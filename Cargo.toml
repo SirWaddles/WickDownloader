@@ -1,0 +1,14 @@
+[package]
+name = "wick_downloader"
+version = "0.1.0"
+authors = ["Waddlesworth <github@genj.io>"]
+edition = "2018"
+
+[dependencies]
+tokio = { version = "0.2", features = ["full"] }
+hyper = { git = "https://github.com/hyperium/hyper" }
+hyper-tls = { git = "https://github.com/hyperium/hyper-tls" }
+bytes = "0.5"
+http = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
