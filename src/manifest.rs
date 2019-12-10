@@ -51,6 +51,15 @@ pub struct AppManifest {
     items: HashMap<String, AppManifestItem>,
 }
 
+impl AppManifest {
+    pub fn get_distributions(&self) -> WickResult<&Vec<String>> {
+        match self.items.get("MANIFEST") {
+            Some(item) => Ok(&item.additional_distributions),
+            None => make_err("Could not get manifest"),
+        }
+    }
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
 pub struct ChunkManifest {

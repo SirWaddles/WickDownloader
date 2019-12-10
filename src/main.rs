@@ -17,5 +17,5 @@ async fn main() {
 
     println!("file: {}", file.filename);
 
-    chunks::download_file(&http_service, &chunk_manifest, &file).await.unwrap();
+    chunks::download_file(&http_service, &chunk_manifest, &app_manifest, &file).await.unwrap();
 }

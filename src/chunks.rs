@@ -1,6 +1,6 @@
 use crate::err::{WickResult, make_err};
 use crate::http::HttpService;
-use crate::manifest::{ChunkManifest, ChunkManifestFile};
+use crate::manifest::{ChunkManifest, ChunkManifestFile, AppManifest};
 use crate::spool::{Spool, PinnedBoxFuture};
 use std::convert::AsRef;
 use std::io::{Cursor, Read, Seek, SeekFrom};
@@ -11,8 +11,6 @@ use futures::{join, FutureExt};
 use futures::stream::StreamExt;
 use futures::channel::mpsc;
 use flate2::bufread::ZlibDecoder;
-
-const TEST_DIST: &'static str = "https://epicgames-download1.akamaized.net/";
 
 struct ChunkGuid {
     data: [u32; 4],
@@ -133,18 +131,21 @@ async fn send_chunk(http: &HttpService, chunk: ChunkDownload, sender: mpsc::Unbo
 
 const REQUEST_COUNT: usize = 20;
 
-pub async fn download_file(http: &HttpService, manifest: &ChunkManifest, file: &ChunkManifestFile) -> WickResult<()> {
+pub async fn download_file(http: &HttpService, manifest: &ChunkManifest, app: &AppManifest, file: &ChunkManifestFile) -> WickResult<()> {
+    let distributions = app.get_distributions()?;
     let mut downloads = Vec::new();
     let mut position = 0;
+    let mut i = 0;
     for chunk in file.get_chunks() {
         let download = ChunkDownload {
             position,
             length: chunk.get_size(),
             offset: chunk.get_offset(),
-            url: TEST_DIST.to_owned() + &chunk.get_url(&manifest)?,
+            url: distributions[i % distributions.len()].to_owned() + &chunk.get_url(&manifest)?,
         };
         downloads.push(download);
         position += chunk.get_size() as u64;
+        i += 1;
     }
 
     let (file_sender, file_receiver) = mpsc::unbounded::<ChunkData>();
