@@ -1,15 +1,14 @@
 use crate::err::{WickResult, make_err};
 use crate::http::HttpService;
 use crate::manifest::{ChunkManifest, ChunkManifestFile};
-use std::pin::Pin;
+use crate::spool::{Spool, PinnedBoxFuture};
 use std::convert::AsRef;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use byteorder::{LittleEndian, ReadBytesExt};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use futures::{join, Future, FutureExt, task::Poll};
+use futures::{join, FutureExt};
 use futures::stream::StreamExt;
-use futures::task::Context;
 use futures::channel::mpsc;
 use flate2::bufread::ZlibDecoder;
 
@@ -104,50 +103,6 @@ struct ChunkDownload {
     offset: u32,
 }
 
-trait Test {
-    fn poll(&self) {
-
-    }
-}
-
-type PinnedBoxFuture<'a> = Pin<Box<dyn Future<Output = WickResult<()>> + Send + 'a>>;
-
-struct ChunkDownloader<'a> {
-    downloads: Vec<PinnedBoxFuture<'a>>,
-    active_down: Vec<PinnedBoxFuture<'a>>,
-}
-
-impl<'a> ChunkDownloader<'a> {
-    fn build(downloads: Vec<PinnedBoxFuture<'a>>) -> Self {
-        Self {
-            downloads,
-            active_down: Vec::new(),
-        }
-    }
-}
-
-impl Future for ChunkDownloader<'_> {
-    type Output = WickResult<()>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut i = 0;
-        while i < self.active_down.len() {
-            match self.active_down[i].poll_unpin(cx) {
-                Poll::Ready(Ok(_val)) => {
-                    self.active_down.remove(i);
-                },
-                Poll::Ready(Err(err)) => {
-                    return Poll::Ready(Err(err));
-                }
-                Poll::Pending => {
-                    i += 1;
-                },
-            }
-        }
-        Poll::Pending
-    }
-}
-
 type ChunkData = (ChunkDownload, Chunk);
 
 async fn write_chunks(mut receiver: mpsc::UnboundedReceiver<ChunkData>, file: &ChunkManifestFile, filesize: u64) -> WickResult<()> {
@@ -176,6 +131,8 @@ async fn send_chunk(http: &HttpService, chunk: ChunkDownload, sender: mpsc::Unbo
     Ok(())
 }
 
+const REQUEST_COUNT: usize = 20;
+
 pub async fn download_file(http: &HttpService, manifest: &ChunkManifest, file: &ChunkManifestFile) -> WickResult<()> {
     let mut downloads = Vec::new();
     let mut position = 0;
@@ -191,15 +148,15 @@ pub async fn download_file(http: &HttpService, manifest: &ChunkManifest, file: &
     }
 
     let (file_sender, file_receiver) = mpsc::unbounded::<ChunkData>();
-    let chunk_downloads: Vec<PinnedBoxFuture> = downloads.into_iter().map(|v| {
+    let chunk_downloads: Vec<PinnedBoxFuture<WickResult<()>>> = downloads.into_iter().map(|v| {
         send_chunk(&http, v, file_sender.clone()).boxed()
     }).collect();
 
     let (r1, r2) = join!(
-        write_chunks(file_receiver, &file, position), 
-        ChunkDownloader::build(chunk_downloads).then(|x| async move {
+        write_chunks(file_receiver, &file, position),
+        Spool::build(chunk_downloads, REQUEST_COUNT).then(|x| async move {
             file_sender.close_channel();
-            Ok(())
+            Ok(()) as WickResult<()>
         })
     );
     // wat

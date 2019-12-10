@@ -3,6 +3,7 @@ mod auth;
 mod manifest;
 mod err;
 mod chunks;
+mod spool;
 
 #[tokio::main]
 async fn main() {
@@ -15,6 +16,6 @@ async fn main() {
     let file = &files[0];
 
     println!("file: {}", file.filename);
-    
+
     chunks::download_file(&http_service, &chunk_manifest, &file).await.unwrap();
 }
