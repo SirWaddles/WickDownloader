@@ -1,10 +1,16 @@
 use crate::err::{WickResult, make_err};
 use crate::http::HttpService;
-use crate::manifest::{ChunkManifest, ChunkManifestFile, ChunkManifestChunkPart};
+use crate::manifest::{ChunkManifest, ChunkManifestFile};
+use std::pin::Pin;
 use std::convert::AsRef;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use byteorder::{LittleEndian, ReadBytesExt};
-use bytes::BytesMut;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+use futures::{join, Future, FutureExt, task::Poll};
+use futures::stream::StreamExt;
+use futures::task::Context;
+use futures::channel::mpsc;
 use flate2::bufread::ZlibDecoder;
 
 const TEST_DIST: &'static str = "https://epicgames-download1.akamaized.net/";
@@ -32,7 +38,7 @@ struct ChunkSha {
 impl ChunkSha {
     fn new<T>(cursor: &mut T) -> WickResult<Self> where T: Read {
         let mut data = [0u8; 20];
-        cursor.read_exact(&mut data);
+        cursor.read_exact(&mut data)?;
         Ok(Self {
             data
         })
@@ -56,10 +62,9 @@ struct Chunk {
 }
 
 impl Chunk {
-    fn new<T>(data: T, chunk: &ChunkManifestChunkPart) -> WickResult<Self> where T: AsRef<[u8]> {
+    fn new<T>(data: T, chunk: &ChunkDownload) -> WickResult<Self> where T: AsRef<[u8]> {
         let mut cursor = Cursor::new(data);
         let magic = cursor.read_u32::<LittleEndian>()?;
-        println!("Magic: {}", magic);
         let header = ChunkHeader {
             version: cursor.read_u32::<LittleEndian>()?,
             size: cursor.read_u32::<LittleEndian>()?,
@@ -79,7 +84,11 @@ impl Chunk {
             let mut decompressed_data = Vec::new();
             let mut decompressor = ZlibDecoder::new(data.as_slice());
             decompressor.read_to_end(&mut decompressed_data)?;
-            println!("compressed");
+            let chunk_size = chunk.length as usize;
+            let chunk_offset = chunk.offset as usize;
+            let mut final_data = vec![0u8; chunk_size];
+            final_data.copy_from_slice(&decompressed_data[chunk_offset..(chunk_offset + chunk_size)]);
+            data = final_data;
         }
 
         Ok(Self {
@@ -88,18 +97,113 @@ impl Chunk {
     }
 }
 
+struct ChunkDownload {
+    position: u64,
+    length: u32,
+    url: String,
+    offset: u32,
+}
+
+trait Test {
+    fn poll(&self) {
+
+    }
+}
+
+type PinnedBoxFuture<'a> = Pin<Box<dyn Future<Output = WickResult<()>> + Send + 'a>>;
+
+struct ChunkDownloader<'a> {
+    downloads: Vec<PinnedBoxFuture<'a>>,
+    active_down: Vec<PinnedBoxFuture<'a>>,
+}
+
+impl<'a> ChunkDownloader<'a> {
+    fn build(downloads: Vec<PinnedBoxFuture<'a>>) -> Self {
+        Self {
+            downloads,
+            active_down: Vec::new(),
+        }
+    }
+}
+
+impl Future for ChunkDownloader<'_> {
+    type Output = WickResult<()>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut i = 0;
+        while i < self.active_down.len() {
+            match self.active_down[i].poll_unpin(cx) {
+                Poll::Ready(Ok(_val)) => {
+                    self.active_down.remove(i);
+                },
+                Poll::Ready(Err(err)) => {
+                    return Poll::Ready(Err(err));
+                }
+                Poll::Pending => {
+                    i += 1;
+                },
+            }
+        }
+        Poll::Pending
+    }
+}
+
+type ChunkData = (ChunkDownload, Chunk);
+
+async fn write_chunks(mut receiver: mpsc::UnboundedReceiver<ChunkData>, file: &ChunkManifestFile, filesize: u64) -> WickResult<()> {
+    let filename = match &file.filename.split("/").last() {
+        Some(path) => path.to_owned(),
+        None => return make_err("Could not get filename"),
+    };
+    let mut file = File::create(filename).await?;
+    file.set_len(filesize).await?;
+    while let Some((data, chunk)) = receiver.next().await {
+        file.seek(SeekFrom::Start(data.position)).await?;
+        file.write_all(&chunk.data).await?;
+    }
+    Ok(())
+}
+
+async fn download_chunk(http: &HttpService, chunk: ChunkDownload) -> WickResult<ChunkData> {
+    let data = http.get_url(&chunk.url).await?;
+    let chunk_data = Chunk::new(data, &chunk)?;
+    Ok((chunk, chunk_data))
+}
+
+async fn send_chunk(http: &HttpService, chunk: ChunkDownload, sender: mpsc::UnboundedSender<ChunkData>) -> WickResult<()> {
+    let data = download_chunk(&http, chunk).await?;
+    sender.unbounded_send(data)?;
+    Ok(())
+}
+
 pub async fn download_file(http: &HttpService, manifest: &ChunkManifest, file: &ChunkManifestFile) -> WickResult<()> {
-    let test_part = &file.get_chunks()[0];
-    /*let url = TEST_DIST.to_owned() + &test_part.get_url(&manifest)?;
-    let chunk = http.get_url(&url).await?;
+    let mut downloads = Vec::new();
+    let mut position = 0;
+    for chunk in file.get_chunks() {
+        let download = ChunkDownload {
+            position,
+            length: chunk.get_size(),
+            offset: chunk.get_offset(),
+            url: TEST_DIST.to_owned() + &chunk.get_url(&manifest)?,
+        };
+        downloads.push(download);
+        position += chunk.get_size() as u64;
+    }
 
-    std::fs::write("test.chunk", chunk).unwrap();*/
-    let chunk_data = std::fs::read("test.chunk").unwrap();
-    let chunk = Chunk::new(chunk_data, &test_part)?;
+    let (file_sender, file_receiver) = mpsc::unbounded::<ChunkData>();
+    let chunk_downloads: Vec<PinnedBoxFuture> = downloads.into_iter().map(|v| {
+        send_chunk(&http, v, file_sender.clone()).boxed()
+    }).collect();
 
-    
-    println!("test: {} {} {}", chunk.header.size, chunk.header.data_size, chunk.data.len());
-    println!("data: {} {}", test_part.get_offset(), test_part.get_size());
+    let (r1, r2) = join!(
+        write_chunks(file_receiver, &file, position), 
+        ChunkDownloader::build(chunk_downloads).then(|x| async move {
+            file_sender.close_channel();
+            Ok(())
+        })
+    );
+    // wat
+    r1?; r2?;
 
     Ok(())
 }

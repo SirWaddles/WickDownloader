@@ -4,7 +4,7 @@ use crate::err::{WickResult, make_err};
 use std::collections::HashMap;
 use std::io::Cursor;
 use byteorder::{LittleEndian, ReadBytesExt};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use hyper::{Request, Body};
 
 const MANIFEST_URL: &'static str = "https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/public/assets/Windows/4fe75bbc5a674f4f9b356b5c90567da5/Fortnite?label=Live";
@@ -86,12 +86,19 @@ impl ChunkManifestFile {
     }
 }
 
+fn read_blob<'de, D>(deserializer: D) -> Result<u32, D::Error> where D: Deserializer<'de> {
+    let raw: &str = Deserialize::deserialize(deserializer)?;
+    Ok(parse_int_blob_u32(raw))
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
 pub struct ChunkManifestChunkPart {
     guid: String,
-    offset: String,
-    size: String,
+    #[serde(deserialize_with = "read_blob")]
+    offset: u32,
+    #[serde(deserialize_with = "read_blob")]
+    size: u32,
 }
 
 impl ChunkManifestChunkPart {
@@ -106,11 +113,11 @@ impl ChunkManifestChunkPart {
     }
 
     pub fn get_offset(&self) -> u32 {
-        parse_int_blob_u32(&self.offset)
+        self.offset
     }
 
     pub fn get_size(&self) -> u32 {
-        parse_int_blob_u32(&self.size)
+        self.size
     }
 }
 
