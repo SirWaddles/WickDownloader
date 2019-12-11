@@ -2,16 +2,14 @@ use std::pin::Pin;
 use futures::task::Context;
 use futures::{Future, FutureExt, task::Poll};
 
-pub type PinnedBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-pub struct Spool<'a, T, E> {
-    futures: Vec<PinnedBoxFuture<'a, Result<T, E>>>,
-    active_futures: Vec<PinnedBoxFuture<'a, Result<T, E>>>,
+pub struct Spool<T> {
+    futures: Vec<T>,
+    active_futures: Vec<T>,
     spool_limit: usize,
 }
 
-impl<'a, T, E> Spool<'a, T, E> {
-    pub fn build(futures: Vec<PinnedBoxFuture<'a, Result<T, E>>>, spool_limit: usize) -> Spool<'a, T, E> {
+impl<I, E, T: Future<Output=Result<I, E>> + Unpin> Spool<T> {
+    pub fn build(futures: Vec<T>, spool_limit: usize) -> impl Future<Output = Result<(), E>> {
         Self {
             futures,
             active_futures: Vec::new(),
@@ -20,10 +18,10 @@ impl<'a, T, E> Spool<'a, T, E> {
     }
 }
 
-impl<T, E> Future for Spool<'_, T, E> {
+impl<I, E, T: Future<Output=Result<I, E>> + Unpin> Future for Spool<T> {
     type Output = Result<(), E>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let mut i = 0;
         while i < self.active_futures.len() {
             match self.active_futures[i].poll_unpin(cx) {

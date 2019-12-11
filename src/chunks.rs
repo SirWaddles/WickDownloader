@@ -1,7 +1,7 @@
 use crate::err::{WickResult, make_err};
 use crate::http::HttpService;
 use crate::manifest::{ChunkManifest, ChunkManifestFile, AppManifest};
-use crate::spool::{Spool, PinnedBoxFuture};
+use crate::spool::Spool;
 use std::convert::AsRef;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -94,6 +94,7 @@ impl Chunk {
     }
 }
 
+#[derive(Clone)]
 struct ChunkDownload {
     position: u64,
     length: u32,
@@ -149,8 +150,8 @@ pub async fn download_file(http: &HttpService, manifest: &ChunkManifest, app: &A
     }
 
     let (file_sender, file_receiver) = mpsc::unbounded::<ChunkData>();
-    let chunk_downloads: Vec<PinnedBoxFuture<WickResult<()>>> = downloads.into_iter().map(|v| {
-        send_chunk(&http, v, file_sender.clone()).boxed()
+    let chunk_downloads = downloads.into_iter().map(|v| {
+        Box::pin(send_chunk(&http, v, file_sender.clone()))
     }).collect();
 
     let (r1, r2) = join!(
