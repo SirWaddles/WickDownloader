@@ -3,7 +3,7 @@ use crate::http::HttpService;
 use crate::manifest::{ChunkManifest, ChunkManifestFile, AppManifest};
 use crate::spool::Spool;
 use std::convert::AsRef;
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::{Cursor, Read, Write, Seek, SeekFrom, Result as IOResult};
 use byteorder::{LittleEndian, ReadBytesExt};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
@@ -100,6 +100,7 @@ struct ChunkDownload {
     length: u32,
     url: String,
     offset: u32,
+    index: usize,
 }
 
 type ChunkData = (ChunkDownload, Chunk);
@@ -143,6 +144,7 @@ pub async fn download_file(http: Arc<HttpService>, manifest: &ChunkManifest, app
             length: chunk.get_size(),
             offset: chunk.get_offset(),
             url: distributions[i % distributions.len()].to_owned() + &chunk.get_url(&manifest)?,
+            index: i,
         };
         downloads.push(download);
         position += chunk.get_size() as u64;
@@ -167,50 +169,94 @@ pub async fn download_file(http: Arc<HttpService>, manifest: &ChunkManifest, app
     Ok(())
 }
 
+pub fn make_reader(http: Arc<HttpService>, manifest: &ChunkManifest, app: &AppManifest, file: &ChunkManifestFile) -> WickResult<ChunkReader> {
+    let distributions = app.get_distributions()?;
+    let mut downloads = Vec::new();
+    let mut position = 0;
+    let mut i = 0;
+    for chunk in file.get_chunks() {
+        let download = ChunkDownload {
+            position,
+            length: chunk.get_size(),
+            offset: chunk.get_offset(),
+            url: distributions[i % distributions.len()].to_owned() + &chunk.get_url(&manifest)?,
+            index: i,
+        };
+        downloads.push(download);
+        position += chunk.get_size() as u64;
+        i += 1;
+    }
+
+    Ok(ChunkReader::new(http.clone(), downloads))
+}
+
 use std::pin::Pin;
 use std::sync::Arc;
-use std::io::Write;
 use futures::Future;
 use futures::task::{Context, Poll};
 use tokio::io::AsyncRead;
-use tokio::io::Error as TokioError;
 
 enum ChunkReaderState {
     Resolving(Pin<Box<dyn Future<Output=WickResult<ChunkData>>>>),
     Idle(ChunkData),
 }
 
-struct ChunkReader {
+pub struct ChunkReader {
     http: Arc<HttpService>,
     chunks: Vec<ChunkDownload>,
     position: u64,
     current_chunk: usize,
     state: ChunkReaderState,
+    total_size: u64,
 }
 
 impl ChunkReader {
-    fn new(chunks: Vec<ChunkDownload>) -> ChunkReader {
-        let http = Arc::new(HttpService::new());
+    fn new(http: Arc<HttpService>, chunks: Vec<ChunkDownload>) -> Self {
+        if chunks.len() <= 0 {
+            panic!("Cannot read an empty chunk list.");
+        }
+        let total_size = {
+            let last_chunk = chunks.last().unwrap();
+            last_chunk.position + last_chunk.length as u64
+        };
         let first_resolve = download_chunk(http.clone(), chunks[0].clone());
-        ChunkReader {
-            http,
+        Self {
+            http: http.clone(),
             chunks,
             position: 0,
             current_chunk: 0,
             state: ChunkReaderState::Resolving(Box::pin(first_resolve)),
+            total_size,
         }
     }
 }
 
+impl Seek for ChunkReader {
+    fn seek(&mut self, seek: SeekFrom) -> IOResult<u64> {
+        let fpos = match seek {
+            SeekFrom::Start(pos) => pos,
+            SeekFrom::End(pos) => (pos + (self.total_size as i64)) as u64,
+            SeekFrom::Current(pos) => (pos + (self.position as i64)) as u64,
+        };
+        let chunk = self.chunks.iter().find(|&i| i.position >= fpos && (i.position + i.length as u64) < fpos).unwrap();
+        if self.current_chunk != chunk.index {
+            self.state = ChunkReaderState::Resolving(Box::pin(download_chunk(self.http.clone(), chunk.clone())));
+        }
+
+        self.position = fpos;
+        Ok(fpos)
+    }
+}
+
 impl AsyncRead for ChunkReader {
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context, mut buf: &mut [u8]) -> Poll<Result<usize, TokioError>> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context, mut buf: &mut [u8]) -> Poll<IOResult<usize>> {
         let this = self.get_mut();
         loop {
             match &mut this.state {
                 ChunkReaderState::Resolving(resolve) => {
                     match resolve.as_mut().poll(cx) {
                         Poll::Ready(data) => {
-                            this.state = ChunkReaderState::Idle(data.unwrap()); // drops the future (is this safe?)
+                            this.state = ChunkReaderState::Idle(data.unwrap());
                         },
                         Poll::Pending => return Poll::Pending,
                     }
