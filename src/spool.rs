@@ -1,30 +1,31 @@
 use std::pin::Pin;
 use futures::task::Context;
-use futures::{Future, FutureExt, task::Poll};
+use futures::{Future, task::Poll};
 
 pub struct Spool<T> {
-    futures: Vec<T>,
-    active_futures: Vec<T>,
+    futures: Vec<Pin<Box<T>>>,
+    active_futures: Vec<Pin<Box<T>>>,
     spool_limit: usize,
 }
 
-impl<I, E, T: Future<Output=Result<I, E>> + Unpin> Spool<T> {
+impl<I, E, T: Future<Output=Result<I, E>>> Spool<T> {
     pub fn build(futures: Vec<T>, spool_limit: usize) -> impl Future<Output = Result<(), E>> {
         Self {
-            futures,
+            futures: futures.into_iter().map(|v| Box::pin(v)).collect(),
             active_futures: Vec::new(),
             spool_limit,
         }
     }
 }
 
-impl<I, E, T: Future<Output=Result<I, E>> + Unpin> Future for Spool<T> {
+impl<I, E, T: Future<Output=Result<I, E>>> Future for Spool<T> {
     type Output = Result<(), E>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let mut i = 0;
         while i < self.active_futures.len() {
-            match self.active_futures[i].poll_unpin(cx) {
+            let active_box = &mut self.active_futures[i];
+            match active_box.as_mut().poll(cx) {
                 Poll::Ready(Ok(_val)) => {
                     self.active_futures.remove(i);
                 },

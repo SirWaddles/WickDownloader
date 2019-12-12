@@ -5,9 +5,11 @@ mod err;
 mod chunks;
 mod spool;
 
+use std::sync::Arc;
+
 #[tokio::main]
 async fn main() {
-    let http_service = crate::http::HttpService::new();
+    let http_service = Arc::new(crate::http::HttpService::new());
     let access_token = auth::get_token(&http_service).await.unwrap();
     let app_manifest = manifest::get_manifest(&http_service, &access_token).await.unwrap();
     let mut chunk_manifest = manifest::get_chunk_manifest(&http_service, &app_manifest).await.unwrap();
@@ -17,5 +19,5 @@ async fn main() {
 
     println!("file: {}", file.filename);
 
-    chunks::download_file(&http_service, &chunk_manifest, &app_manifest, &file).await.unwrap();
+    chunks::download_file(http_service, &chunk_manifest, &app_manifest, &file).await.unwrap();
 }

@@ -118,21 +118,21 @@ async fn write_chunks(mut receiver: mpsc::UnboundedReceiver<ChunkData>, file: &C
     Ok(())
 }
 
-async fn download_chunk(http: &HttpService, chunk: ChunkDownload) -> WickResult<ChunkData> {
+async fn download_chunk(http: Arc<HttpService>, chunk: ChunkDownload) -> WickResult<ChunkData> {
     let data = http.get_url(&chunk.url).await?;
     let chunk_data = Chunk::new(data, &chunk)?;
     Ok((chunk, chunk_data))
 }
 
-async fn send_chunk(http: &HttpService, chunk: ChunkDownload, sender: mpsc::UnboundedSender<ChunkData>) -> WickResult<()> {
-    let data = download_chunk(&http, chunk).await?;
+async fn send_chunk(http: Arc<HttpService>, chunk: ChunkDownload, sender: mpsc::UnboundedSender<ChunkData>) -> WickResult<()> {
+    let data = download_chunk(http.clone(), chunk).await?;
     sender.unbounded_send(data)?;
     Ok(())
 }
 
 const REQUEST_COUNT: usize = 20;
 
-pub async fn download_file(http: &HttpService, manifest: &ChunkManifest, app: &AppManifest, file: &ChunkManifestFile) -> WickResult<()> {
+pub async fn download_file(http: Arc<HttpService>, manifest: &ChunkManifest, app: &AppManifest, file: &ChunkManifestFile) -> WickResult<()> {
     let distributions = app.get_distributions()?;
     let mut downloads = Vec::new();
     let mut position = 0;
@@ -151,7 +151,7 @@ pub async fn download_file(http: &HttpService, manifest: &ChunkManifest, app: &A
 
     let (file_sender, file_receiver) = mpsc::unbounded::<ChunkData>();
     let chunk_downloads = downloads.into_iter().map(|v| {
-        Box::pin(send_chunk(&http, v, file_sender.clone()))
+        send_chunk(http.clone(), v, file_sender.clone())
     }).collect();
 
     let (r1, r2) = join!(
@@ -165,4 +165,73 @@ pub async fn download_file(http: &HttpService, manifest: &ChunkManifest, app: &A
     r1?; r2?;
 
     Ok(())
+}
+
+use std::pin::Pin;
+use std::sync::Arc;
+use std::io::Write;
+use futures::Future;
+use futures::task::{Context, Poll};
+use tokio::io::AsyncRead;
+use tokio::io::Error as TokioError;
+
+enum ChunkReaderState {
+    Resolving(Pin<Box<dyn Future<Output=WickResult<ChunkData>>>>),
+    Idle(ChunkData),
+}
+
+struct ChunkReader {
+    http: Arc<HttpService>,
+    chunks: Vec<ChunkDownload>,
+    position: u64,
+    current_chunk: usize,
+    state: ChunkReaderState,
+}
+
+impl ChunkReader {
+    fn new(chunks: Vec<ChunkDownload>) -> ChunkReader {
+        let http = Arc::new(HttpService::new());
+        let first_resolve = download_chunk(http.clone(), chunks[0].clone());
+        ChunkReader {
+            http,
+            chunks,
+            position: 0,
+            current_chunk: 0,
+            state: ChunkReaderState::Resolving(Box::pin(first_resolve)),
+        }
+    }
+}
+
+impl AsyncRead for ChunkReader {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context, mut buf: &mut [u8]) -> Poll<Result<usize, TokioError>> {
+        let this = self.get_mut();
+        loop {
+            match &mut this.state {
+                ChunkReaderState::Resolving(resolve) => {
+                    match resolve.as_mut().poll(cx) {
+                        Poll::Ready(data) => {
+                            this.state = ChunkReaderState::Idle(data.unwrap()); // drops the future (is this safe?)
+                        },
+                        Poll::Pending => return Poll::Pending,
+                    }
+                },
+                ChunkReaderState::Idle((download, data)) => {
+                    let pos_in_chunk = (this.position - download.position) as usize;
+                    let to_write = std::cmp::min(buf.len(), (download.length as usize) - pos_in_chunk);
+                    if to_write > 0 {
+                        this.position += to_write as u64;
+                        buf.write_all(&data.data[pos_in_chunk..(pos_in_chunk + to_write)]).unwrap();
+                        return Poll::Ready(Ok(to_write));
+                    } else {
+                        this.current_chunk += 1;
+                        if this.current_chunk >= this.chunks.len() {
+                            return Poll::Ready(Ok(0)); // Nothing left to read
+                        }
+                        let resolve = download_chunk(this.http.clone(), this.chunks[this.current_chunk].clone());
+                        this.state = ChunkReaderState::Resolving(Box::pin(resolve));
+                    }
+                },
+            }
+        }
+    }
 }
