@@ -1,14 +1,20 @@
 #[derive(Debug)]
 pub struct WickError {
-    error: &'static str,
+    error: String,
 }
 
 pub type WickResult<T> = Result<T, WickError>;
 
 impl WickError {
-    fn new(error: &'static str) -> Self {
+    fn new(error: &str) -> Self {
         WickError {
-            error
+            error: error.to_owned(),
+        }
+    }
+
+    fn new_str(error: String) -> Self {
+        WickError {
+            error,
         }
     }
 }
@@ -54,8 +60,8 @@ impl From<std::num::ParseIntError> for WickError {
 }
 
 impl From<serde_json::Error> for WickError {
-    fn from(_error: serde_json::Error) -> Self {
-        Self::new("Could not deserialize JSON")
+    fn from(error: serde_json::Error) -> Self {
+        Self::new_str(format!("Could not deserialize JSON: {}", error))
     }
 }
 
@@ -71,8 +77,6 @@ impl<T> From<futures::channel::mpsc::TrySendError<T>> for WickError {
     }
 }
 
-pub fn make_err<T>(msg: &'static str) -> Result<T, WickError> {
-    Err(WickError {
-        error: msg,
-    })
+pub fn make_err<T>(msg: &str) -> Result<T, WickError> {
+    Err(WickError::new(msg))
 }

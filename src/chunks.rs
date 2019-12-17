@@ -94,7 +94,7 @@ impl Chunk {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct ChunkDownload {
     position: u64,
     length: u32,
@@ -238,12 +238,13 @@ impl Seek for ChunkReader {
             SeekFrom::End(pos) => (pos + (self.total_size as i64)) as u64,
             SeekFrom::Current(pos) => (pos + (self.position as i64)) as u64,
         };
-        let chunk = self.chunks.iter().find(|&i| i.position >= fpos && (i.position + i.length as u64) < fpos).unwrap();
+        let chunk = self.chunks.iter().find(|&i| fpos >= i.position && (i.position + i.length as u64) > fpos).expect("No chunk found for position");
         if self.current_chunk != chunk.index {
             self.state = ChunkReaderState::Resolving(Box::pin(download_chunk(self.http.clone(), chunk.clone())));
         }
 
         self.position = fpos;
+        self.current_chunk = chunk.index;
         Ok(fpos)
     }
 }
