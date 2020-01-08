@@ -203,7 +203,7 @@ enum ChunkReaderState {
 
 pub struct ChunkReader {
     http: Arc<HttpService>,
-    chunks: Vec<ChunkDownload>,
+    chunks: Arc<Vec<ChunkDownload>>,
     position: u64,
     current_chunk: usize,
     state: ChunkReaderState,
@@ -222,11 +222,23 @@ impl ChunkReader {
         let first_resolve = download_chunk(http.clone(), chunks[0].clone());
         Self {
             http: http.clone(),
-            chunks,
+            chunks: Arc::new(chunks),
             position: 0,
             current_chunk: 0,
             state: ChunkReaderState::Resolving(Box::pin(first_resolve)),
             total_size,
+        }
+    }
+
+    pub fn reset(&self) -> Self {
+        let first_resolve = download_chunk(self.http.clone(), self.chunks[0].clone());
+        Self {
+            http: Arc::clone(&self.http),
+            chunks: Arc::clone(&self.chunks),
+            position: 0,
+            current_chunk: 0,
+            state: ChunkReaderState::Resolving(Box::pin(first_resolve)),
+            total_size: self.total_size,
         }
     }
 }

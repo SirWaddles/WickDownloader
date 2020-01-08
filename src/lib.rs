@@ -5,7 +5,7 @@ mod auth;
 mod chunks;
 mod spool;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 pub use err::WickResult;
 use std::io::{Seek, SeekFrom, Cursor};
 use tokio::io::{AsyncReadExt};
@@ -25,7 +25,7 @@ pub struct ServiceState {
 
 pub struct PakService {
     pak_index: FPakIndex,
-    reader: chunks::ChunkReader,
+    reader: Mutex<chunks::ChunkReader>,
 }
 
 impl ServiceState {
@@ -80,7 +80,7 @@ impl ServiceState {
 
         Ok(PakService {
             pak_index,
-            reader,
+            reader: Mutex::new(reader),
         })
     }
 }
@@ -90,16 +90,22 @@ impl PakService {
         self.pak_index.get_entries().iter().map(|v| v.get_filename().to_owned()).collect()
     }
 
-    pub async fn get_data(&mut self, filename: &str) -> WickResult<Vec<u8>> {
+    pub fn get_mount_point(&self) -> &str {
+        &self.pak_index.get_mount_point()
+    }
+
+    pub async fn get_data(&self, filename: &str) -> WickResult<Vec<u8>> {
         let file = match self.pak_index.get_entries().iter().find(|v| v.get_filename() == filename) {
             Some(f) => f,
             None => return err::make_err("Could not find file"),
         };
 
+        let mut reader = self.reader.lock().unwrap().reset();
+
         let start_pos = file.position as u64 + file.struct_size;
-        self.reader.seek(SeekFrom::Start(start_pos))?;
+        reader.seek(SeekFrom::Start(start_pos))?;
         let mut buffer = vec![0u8; file.size as usize];
-        self.reader.read_exact(&mut buffer).await?;
+        reader.read_exact(&mut buffer).await?;
 
         Ok(buffer)
     }
