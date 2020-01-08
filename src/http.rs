@@ -10,7 +10,7 @@ pub struct HttpService {
 
 impl HttpService {
     pub fn new() -> Self {
-        let https = HttpsConnector::new().unwrap();
+        let https = HttpsConnector::new();
         let client = Client::builder().build::<_, hyper::Body>(https);
 
         Self {

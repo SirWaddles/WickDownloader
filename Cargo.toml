@@ -1,5 +1,5 @@
 [package]
-name = "wick_downloader"
+name = "wickdl"
 version = "0.1.0"
 authors = ["Waddlesworth <github@genj.io>"]
 edition = "2018"
@@ -7,8 +7,8 @@ edition = "2018"
 [dependencies]
 futures = { version = "0.3", features = ["async-await"] }
 tokio = { version = "0.2", features = ["full"] }
-hyper = { git = "https://github.com/hyperium/hyper" }
-hyper-tls = { git = "https://github.com/hyperium/hyper-tls" }
+hyper = "0.13"
+hyper-tls = "0.4"
 bytes = "0.5"
 http = "0.2"
 serde = { version = "1.0", features = ["derive"] }
@@ -19,5 +19,4 @@ flate2 = "1.0"
 aes-soft = "0.3"
 block-modes = "0.3"
 hex = "0.4"
-#john-wick-parse = { git = "https://github.com/SirWaddles/JohnWickParse" }
-john-wick-parse = { path = "D:\\GitHub\\JohnWickParse" }
+john-wick-parse = { git = "https://github.com/SirWaddles/JohnWickParse" }

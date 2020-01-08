@@ -1,4 +1,5 @@
 use crate::http::HttpService;
+use crate::err::WickResult;
 use hyper::{Request, Body};
 use serde::Deserialize;
 
@@ -24,7 +25,7 @@ impl AccessToken {
     }
 }
 
-pub async fn get_token(http: &HttpService) -> Result<AccessToken, Box<dyn std::error::Error>> {
+pub async fn get_token(http: &HttpService) -> WickResult<AccessToken> {
     let req = Request::builder()
         .method("POST")
         .uri(CREDENTIAL_URL)

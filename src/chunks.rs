@@ -197,7 +197,7 @@ use futures::task::{Context, Poll};
 use tokio::io::AsyncRead;
 
 enum ChunkReaderState {
-    Resolving(Pin<Box<dyn Future<Output=WickResult<ChunkData>>>>),
+    Resolving(Pin<Box<dyn Future<Output=WickResult<ChunkData>> + Send>>),
     Idle(ChunkData),
 }
 

@@ -77,6 +77,30 @@ impl<T> From<futures::channel::mpsc::TrySendError<T>> for WickError {
     }
 }
 
+impl From<john_wick_parse::assets::ParserError> for WickError {
+    fn from(error: john_wick_parse::assets::ParserError) -> Self {
+        Self::new_str(format!("Could not parse: {}", error))
+    }
+}
+
+impl From<block_modes::InvalidKeyIvLength> for WickError {
+    fn from(_error: block_modes::InvalidKeyIvLength) -> Self {
+        Self::new("Invalid key")
+    }
+}
+
+impl From<block_modes::BlockModeError> for WickError {
+    fn from(_error: block_modes::BlockModeError) -> Self {
+        Self::new("Decrypt error")
+    }
+}
+
+impl From<hex::FromHexError> for WickError {
+    fn from(_error: hex::FromHexError) -> Self {
+        Self::new("Hex key error")
+    }
+}
+
 pub fn make_err<T>(msg: &str) -> Result<T, WickError> {
     Err(WickError::new(msg))
 }
