@@ -1,9 +1,8 @@
 use crate::http::HttpService;
 use crate::auth::AccessToken;
-use crate::err::{WickResult, make_err};
+use crate::err::{WickError, WickResult, make_err};
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::fs;
 use byteorder::{LittleEndian, ReadBytesExt};
 use serde::{Deserialize, Deserializer};
 use hyper::{Request, Body};
@@ -140,9 +139,10 @@ pub async fn get_manifest(http: &HttpService, token: &AccessToken) -> WickResult
 
     let manifest = http.post_url_string(req).await?;
 
-    fs::write("app_manifest.json", &manifest).unwrap();
-
-    Ok(serde_json::from_str(&manifest)?)
+    match serde_json::from_str(&manifest) {
+        Ok(res) => Ok(res),
+        Err(_) => Err(WickError::new_str(format!("App Manifest Read Error: {}", &manifest[..std::cmp::min(200, manifest.len())]), 14))
+    }
 }
 
 pub async fn get_chunk_manifest(http: &HttpService, manifest: &AppManifest) -> WickResult<ChunkManifest> {
@@ -153,14 +153,9 @@ pub async fn get_chunk_manifest(http: &HttpService, manifest: &AppManifest) -> W
 
     let manifest_url = manifest_item.distribution.clone() + &manifest_item.path;
     let chunk_manifest = http.get_url_string(&manifest_url).await?;
-    fs::write("chunk_manifest.json", &chunk_manifest).unwrap();
-    Ok(serde_json::from_str(&chunk_manifest)?)
-}
 
-pub fn read_app_manifest(manifest: &str) -> WickResult<AppManifest> {
-    Ok(serde_json::from_str(manifest)?)
-}
-
-pub fn read_chunk_manifest(manifest: &str) -> WickResult<ChunkManifest> {
-    Ok(serde_json::from_str(manifest)?)
+    match serde_json::from_str(&chunk_manifest) {
+        Ok(res) => Ok(res),
+        Err(_) => Err(WickError::new_str(format!("Chunk Manifest Read Error: {}", &chunk_manifest[..std::cmp::min(200, chunk_manifest.len())]), 15))
+    }
 }

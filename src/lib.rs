@@ -90,6 +90,15 @@ impl PakService {
         self.pak_index.get_entries().iter().map(|v| v.get_filename().to_owned()).collect()
     }
 
+    pub fn get_hash(&self, filename: &str) -> WickResult<[u8; 20]> {
+        let file = match self.pak_index.get_entries().iter().find(|v| v.get_filename() == filename) {
+            Some(f) => f,
+            None => return err::make_err("Could not find file"),
+        };
+
+        Ok(file.hash)
+    }
+
     pub fn get_mount_point(&self) -> &str {
         &self.pak_index.get_mount_point()
     }

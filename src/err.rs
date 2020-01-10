@@ -14,7 +14,7 @@ impl WickError {
         }
     }
 
-    fn new_str(error: String, code: u32) -> Self {
+    pub(crate) fn new_str(error: String, code: u32) -> Self {
         WickError {
             error,
             code,
@@ -111,3 +111,7 @@ impl From<hex::FromHexError> for WickError {
 pub fn make_err<T>(msg: &str) -> Result<T, WickError> {
     Err(WickError::new(msg, 12))
 }
+
+// 13 - Authentication Error
+// 14 - App Manifest Read Error
+// 15 - Chunk Manifest Read Error

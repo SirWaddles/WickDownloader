@@ -1,5 +1,5 @@
 use crate::http::HttpService;
-use crate::err::WickResult;
+use crate::err::{WickResult, WickError};
 use hyper::{Request, Body};
 use serde::Deserialize;
 
@@ -34,5 +34,8 @@ pub async fn get_token(http: &HttpService) -> WickResult<AccessToken> {
         .body(Body::from(CLIENT_POST_DATA))?;
 
     let json_result = http.post_url_string(req).await?;
-    Ok(serde_json::from_str(&json_result)?)
+    match serde_json::from_str(&json_result) {
+        Ok(res) => Ok(res),
+        Err(_) => Err(WickError::new_str(format!("Authentication Error with Response: {}", &json_result[..std::cmp::min(200, json_result.len())]), 13))
+    }
 }
