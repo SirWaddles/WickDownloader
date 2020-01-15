@@ -23,6 +23,11 @@ pub struct ServiceState {
     files: Vec<manifest::ChunkManifestFile>,
 }
 
+pub struct EncryptedPak {
+    index_data: Vec<u8>,
+    reader: chunks::ChunkReader,
+}
+
 pub struct PakService {
     pak_index: FPakIndex,
     reader: Mutex<chunks::ChunkReader>,
@@ -48,9 +53,9 @@ impl ServiceState {
 
     pub fn get_paks(&self) -> Vec<String> {
         self.files.iter().map(|v| v.filename.to_owned()).collect()
-    } 
+    }
 
-    pub async fn get_pak(&self, file: String, key: String) -> WickResult<PakService> {
+    pub async fn get_pak(&self, file: String) -> WickResult<EncryptedPak> {
         let file = match self.files.iter().find(|v| v.filename == file) {
             Some(f) => f,
             None => return err::make_err("File does not exist"),
@@ -71,16 +76,23 @@ impl ServiceState {
         let mut buffer = vec![0u8; index_length as usize];
         reader.read_exact(&mut buffer).await?;
 
+        Ok(EncryptedPak {
+            index_data: buffer,
+            reader: reader,
+        })
+    }
+
+    pub async fn decrypt_pak(&self, mut pak: EncryptedPak, key: String) -> WickResult<PakService> {
         let key = hex::decode(&key)?;
         let decrypt = Ecb::<Aes256, ZeroPadding>::new_var(&key, Default::default())?;
-        decrypt.decrypt(&mut buffer)?;
+        decrypt.decrypt(&mut pak.index_data)?;
 
-        let mut index_cursor = Cursor::new(buffer.as_slice());
+        let mut index_cursor = Cursor::new(pak.index_data.as_slice());
         let pak_index = FPakIndex::new(&mut index_cursor)?;
 
         Ok(PakService {
             pak_index,
-            reader: Mutex::new(reader),
+            reader: Mutex::new(pak.reader),
         })
     }
 }
