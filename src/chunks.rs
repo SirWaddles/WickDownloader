@@ -1,4 +1,4 @@
-use crate::err::{WickResult, make_err};
+use crate::err::WickResult;
 use crate::http::HttpService;
 use crate::manifest::{ChunkManifest, ChunkManifestFile, AppManifest};
 use crate::spool::Spool;
@@ -12,6 +12,7 @@ use futures::stream::StreamExt;
 use futures::channel::mpsc;
 use flate2::bufread::ZlibDecoder;
 
+#[allow(dead_code)]
 struct ChunkGuid {
     data: [u32; 4],
 }
@@ -28,6 +29,7 @@ impl ChunkGuid {
     }
 }
 
+#[allow(dead_code)]
 struct ChunkSha {
     data: [u8; 20],
 }
@@ -42,6 +44,7 @@ impl ChunkSha {
     }
 }
 
+#[allow(dead_code)]
 struct ChunkHeader {
     version: u32,
     size: u32,
@@ -53,6 +56,7 @@ struct ChunkHeader {
     hash_type: u8,
 }
 
+#[allow(dead_code)]
 struct Chunk {
     header: ChunkHeader,
     data: Vec<u8>,
@@ -61,7 +65,7 @@ struct Chunk {
 impl Chunk {
     fn new<T>(data: T, chunk: &ChunkDownload) -> WickResult<Self> where T: AsRef<[u8]> {
         let mut cursor = Cursor::new(data);
-        let magic = cursor.read_u32::<LittleEndian>()?;
+        let _magic = cursor.read_u32::<LittleEndian>()?;
         let header = ChunkHeader {
             version: cursor.read_u32::<LittleEndian>()?,
             size: cursor.read_u32::<LittleEndian>()?,
@@ -105,12 +109,8 @@ struct ChunkDownload {
 
 type ChunkData = (ChunkDownload, Chunk);
 
-async fn write_chunks(mut receiver: mpsc::UnboundedReceiver<ChunkData>, file: &ChunkManifestFile, filesize: u64) -> WickResult<()> {
-    let filename = match &file.filename.split("/").last() {
-        Some(path) => path.to_owned(),
-        None => return make_err("Could not get filename"),
-    };
-    let mut file = File::create(filename).await?;
+async fn write_chunks(mut receiver: mpsc::UnboundedReceiver<ChunkData>, filesize: u64, target: &str) -> WickResult<()> {
+    let mut file = File::create(target).await?;
     file.set_len(filesize).await?;
     while let Some((data, chunk)) = receiver.next().await {
         file.seek(SeekFrom::Start(data.position)).await?;
@@ -133,7 +133,7 @@ async fn send_chunk(http: Arc<HttpService>, chunk: ChunkDownload, sender: mpsc::
 
 const REQUEST_COUNT: usize = 20;
 
-pub async fn download_file(http: Arc<HttpService>, manifest: &ChunkManifest, app: &AppManifest, file: &ChunkManifestFile) -> WickResult<()> {
+pub async fn download_file(http: Arc<HttpService>, manifest: &ChunkManifest, app: &AppManifest, file: &ChunkManifestFile, target: &str) -> WickResult<()> {
     let distributions = app.get_distributions()?;
     let mut downloads = Vec::new();
     let mut position = 0;
@@ -157,7 +157,7 @@ pub async fn download_file(http: Arc<HttpService>, manifest: &ChunkManifest, app
     }).collect();
 
     let (r1, r2) = join!(
-        write_chunks(file_receiver, &file, position),
+        write_chunks(file_receiver, position, target),
         Spool::build(chunk_downloads, REQUEST_COUNT).then(|x| async move {
             file_sender.close_channel();
             Ok(()) as WickResult<()>

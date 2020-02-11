@@ -55,6 +55,17 @@ impl ServiceState {
         self.files.iter().map(|v| v.filename.to_owned()).collect()
     }
 
+    pub async fn download_pak(&self, file: String, target: String) -> WickResult<()> {
+        let file = match self.files.iter().find(|v| v.filename == file) {
+            Some(f) => f,
+            None => return err::make_err("File does not exist"),
+        };
+
+        chunks::download_file(self.http.clone(), &self.chunk_manifest, &self.app_manifest, &file, &target).await?;
+
+        Ok(())
+    }
+
     pub async fn get_pak(&self, file: String) -> WickResult<EncryptedPak> {
         let file = match self.files.iter().find(|v| v.filename == file) {
             Some(f) => f,
