@@ -130,6 +130,20 @@ impl ChunkManifestChunkPart {
     }
 }
 
+pub fn create_app_manifest(manifest: &str) -> WickResult<AppManifest> {
+    match serde_json::from_str(manifest) {
+        Ok(res) => Ok(res),
+        Err(_) => Err(WickError::new_str(format!("App Manifest Create Error: {}", &manifest[..std::cmp::min(200, manifest.len())]), 14)),
+    }
+}
+
+pub fn create_chunk_manifest(manifest: &str) -> WickResult<ChunkManifest> {
+    match serde_json::from_str(manifest) {
+        Ok(res) => Ok(res),
+        Err(_) => Err(WickError::new_str(format!("Chunk Manifest Create Error: {}", &manifest[..std::cmp::min(200, manifest.len())]), 14)),
+    }
+}
+
 pub async fn get_manifest(http: &HttpService, token: &AccessToken) -> WickResult<AppManifest> {
     let req = Request::builder()
         .method("GET")

@@ -51,6 +51,20 @@ impl ServiceState {
         })
     }
 
+    pub fn from_manifests(app_manifest: &str, chunk_manifest: &str) -> WickResult<Self> {
+        let http_service = Arc::new(crate::http::HttpService::new());
+        let app_manifest = manifest::create_app_manifest(app_manifest)?;
+        let mut chunk_manifest = manifest::create_chunk_manifest(chunk_manifest)?;
+        let files = chunk_manifest.get_files_mut(|v| &v[v.len() - 4..] == ".pak" && &v[..8] == "Fortnite");
+
+        Ok(Self {
+            http: http_service,
+            app_manifest,
+            chunk_manifest,
+            files,
+        })
+    }
+
     pub fn get_paks(&self) -> Vec<String> {
         self.files.iter().map(|v| v.filename.to_owned()).collect()
     }
