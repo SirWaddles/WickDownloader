@@ -10,7 +10,7 @@ pub use err::WickResult;
 use std::io::{Seek, SeekFrom, Cursor};
 use tokio::io::{AsyncReadExt};
 use john_wick_parse::assets::Newable;
-use john_wick_parse::archives::{FPakInfo, FPakIndex};
+use john_wick_parse::archives::{FPakInfo, FPakIndex, FPakEntry};
 use block_modes::{BlockMode, Ecb, block_padding::ZeroPadding};
 use aes_soft::Aes256;
 
@@ -29,6 +29,7 @@ pub struct EncryptedPak {
 }
 
 pub struct PakService {
+    key: [u8; 20],
     pak_index: FPakIndex,
     reader: Mutex<chunks::ChunkReader>,
 }
@@ -109,6 +110,8 @@ impl ServiceState {
 
     pub async fn decrypt_pak(&self, mut pak: EncryptedPak, key: String) -> WickResult<PakService> {
         let key = hex::decode(&key)?;
+        let mut key_buf = [0u8; 20];
+        key_buf.copy_from_slice(&key);
         let decrypt = Ecb::<Aes256, ZeroPadding>::new_var(&key, Default::default())?;
         decrypt.decrypt(&mut pak.index_data)?;
 
@@ -116,6 +119,7 @@ impl ServiceState {
         let pak_index = FPakIndex::new(&mut index_cursor)?;
 
         Ok(PakService {
+            key: key_buf,
             pak_index,
             reader: Mutex::new(pak.reader),
         })
@@ -140,6 +144,23 @@ impl PakService {
         &self.pak_index.get_mount_point()
     }
 
+    async fn decrypt_data(&self, file: &FPakEntry, reader: &mut chunks::ChunkReader, output: &mut [u8]) -> WickResult<()> {
+        let enc_size = match file.size % 16 {
+            0 => file.size,
+            _ => ((file.size / 16) + 1) * 16,
+        };
+
+        let mut enc_buffer = vec![0u8; enc_size as usize];
+        reader.read_exact(&mut enc_buffer).await?;
+
+        let decrypt = Ecb::<Aes256, ZeroPadding>::new_var(&self.key, Default::default())?;
+        decrypt.decrypt(&mut enc_buffer)?;
+
+        output.copy_from_slice(&enc_buffer[..file.size as usize]);
+
+        Ok(())
+    }
+
     pub async fn get_data(&self, filename: &str) -> WickResult<Vec<u8>> {
         let file = match self.pak_index.get_entries().iter().find(|v| v.get_filename() == filename) {
             Some(f) => f,
@@ -151,7 +172,12 @@ impl PakService {
         let start_pos = file.position as u64 + file.struct_size;
         reader.seek(SeekFrom::Start(start_pos))?;
         let mut buffer = vec![0u8; file.size as usize];
-        reader.read_exact(&mut buffer).await?;
+
+        if file.encrypted {
+            self.decrypt_data(&file, &mut reader, &mut buffer).await?;
+        } else {
+            reader.read_exact(&mut buffer).await?;
+        }
 
         Ok(buffer)
     }
