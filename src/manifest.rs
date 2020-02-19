@@ -165,7 +165,7 @@ pub async fn get_chunk_manifest(http: &HttpService, manifest: &AppManifest) -> W
         None => make_err("Could not retrieve manifest")?,
     };
 
-    let manifest_url = manifest_item.distribution.clone() + &manifest_item.path;
+    let manifest_url = manifest_item.distribution.clone() + &manifest_item.path + "?" + &manifest_item.signature;
     let chunk_manifest = http.get_url_string(&manifest_url).await?;
 
     match serde_json::from_str(&chunk_manifest) {
