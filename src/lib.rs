@@ -29,7 +29,7 @@ pub struct EncryptedPak {
 }
 
 pub struct PakService {
-    key: [u8; 20],
+    key: [u8; 32],
     pak_index: FPakIndex,
     reader: Mutex<chunks::ChunkReader>,
 }
@@ -110,7 +110,7 @@ impl ServiceState {
 
     pub async fn decrypt_pak(&self, mut pak: EncryptedPak, key: String) -> WickResult<PakService> {
         let key = hex::decode(&key)?;
-        let mut key_buf = [0u8; 20];
+        let mut key_buf = [0u8; 32];
         key_buf.copy_from_slice(&key);
         let decrypt = Ecb::<Aes256, ZeroPadding>::new_var(&key, Default::default())?;
         decrypt.decrypt(&mut pak.index_data)?;
