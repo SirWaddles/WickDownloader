@@ -1,6 +1,6 @@
 [package]
 name = "wickdl"
-version = "0.2.3"
+version = "0.2.4"
 authors = ["Waddlesworth <github@genj.io>"]
 edition = "2018"
 

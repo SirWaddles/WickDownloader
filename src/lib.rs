@@ -40,7 +40,7 @@ impl ServiceState {
         let access_token = auth::get_token(&http_service).await?;
         let app_manifest = manifest::get_manifest(&http_service, &access_token).await?;
         let mut chunk_manifest = manifest::get_chunk_manifest(&http_service, &app_manifest).await?;
-        
+
         // Filter out just the pak files
         let files = chunk_manifest.get_files_mut(|v| &v[v.len() - 4..] == ".pak" && &v[..8] == "Fortnite");
 
@@ -116,7 +116,17 @@ impl ServiceState {
         decrypt.decrypt(&mut pak.index_data)?;
 
         let mut index_cursor = Cursor::new(pak.index_data.as_slice());
-        let pak_index = FPakIndex::new(&mut index_cursor)?;
+        let mut pak_index = FPakIndex::new(&mut index_cursor)?;
+        let dir_index = pak_index.get_dir_index();
+
+        pak.reader.seek(SeekFrom::Start(dir_index.0 as u64))?;
+        let mut dir_index_b = vec![0u8; dir_index.1 as usize];
+        pak.reader.read_exact(&mut dir_index_b).await?;
+        let decrypt = Ecb::<Aes256, ZeroPadding>::new_var(&key, Default::default())?;
+        decrypt.decrypt(&mut dir_index_b)?;
+
+        let mut directory_reader = Cursor::new(dir_index_b.as_slice());
+        pak_index.update_from_index(&mut directory_reader)?;
 
         Ok(PakService {
             key: key_buf,
