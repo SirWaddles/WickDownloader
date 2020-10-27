@@ -90,24 +90,6 @@ impl From<john_wick_parse::assets::ParserError> for WickError {
     }
 }
 
-impl From<block_modes::InvalidKeyIvLength> for WickError {
-    fn from(_error: block_modes::InvalidKeyIvLength) -> Self {
-        Self::new("Invalid key", 9)
-    }
-}
-
-impl From<block_modes::BlockModeError> for WickError {
-    fn from(_error: block_modes::BlockModeError) -> Self {
-        Self::new("Decrypt error", 10)
-    }
-}
-
-impl From<hex::FromHexError> for WickError {
-    fn from(_error: hex::FromHexError) -> Self {
-        Self::new("Hex key error", 11)
-    }
-}
-
 pub fn make_err<T>(msg: &str) -> Result<T, WickError> {
     Err(WickError::new(msg, 12))
 }
