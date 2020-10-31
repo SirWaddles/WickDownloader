@@ -124,5 +124,9 @@ impl UtocService {
     pub fn get_file_list(&self) -> &Vec<String> {
         self.utoc.get_file_list()
     }
+
+    pub fn get_mount_point(&self) -> &str {
+        self.utoc.get_mount_point()
+    }
 }
 
