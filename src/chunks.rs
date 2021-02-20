@@ -3,10 +3,10 @@ use crate::http::HttpService;
 use crate::manifest::{ChunkManifest, ChunkManifestFile, AppManifest};
 use crate::spool::Spool;
 use std::convert::AsRef;
-use std::io::{Cursor, Read, Write, Seek, SeekFrom, Result as IOResult};
+use std::io::{Cursor, Read, Seek, SeekFrom, Result as IOResult};
 use byteorder::{LittleEndian, ReadBytesExt};
 use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, AsyncSeekExt, ReadBuf};
 use futures::{join, FutureExt};
 use futures::stream::StreamExt;
 use futures::channel::mpsc;
@@ -262,7 +262,7 @@ impl Seek for ChunkReader {
 }
 
 impl AsyncRead for ChunkReader {
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context, mut buf: &mut [u8]) -> Poll<IOResult<usize>> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context, buf: &mut ReadBuf) -> Poll<IOResult<()>> {
         let this = self.get_mut();
         loop {
             match &mut this.state {
@@ -276,15 +276,15 @@ impl AsyncRead for ChunkReader {
                 },
                 ChunkReaderState::Idle((download, data)) => {
                     let pos_in_chunk = (this.position - download.position) as usize;
-                    let to_write = std::cmp::min(buf.len(), (download.length as usize) - pos_in_chunk);
+                    let to_write = std::cmp::min(buf.remaining(), (download.length as usize) - pos_in_chunk);
                     if to_write > 0 {
                         this.position += to_write as u64;
-                        buf.write_all(&data.data[pos_in_chunk..(pos_in_chunk + to_write)]).unwrap();
-                        return Poll::Ready(Ok(to_write));
+                        buf.put_slice(&data.data[pos_in_chunk..(pos_in_chunk + to_write)]);
+                        return Poll::Ready(Ok(()));
                     } else {
                         this.current_chunk += 1;
                         if this.current_chunk >= this.chunks.len() {
-                            return Poll::Ready(Ok(0)); // Nothing left to read
+                            return Poll::Ready(Ok(())); // Nothing left to read
                         }
                         let resolve = download_chunk(this.http.clone(), this.chunks[this.current_chunk].clone());
                         this.state = ChunkReaderState::Resolving(Box::pin(resolve));
