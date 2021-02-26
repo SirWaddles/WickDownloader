@@ -52,9 +52,14 @@ pub struct AppManifest {
 }
 
 impl AppManifest {
-    pub fn get_distributions(&self) -> WickResult<&Vec<String>> {
+    pub fn get_distributions(&self) -> WickResult<Vec<String>> {
         match self.items.get("MANIFEST") {
-            Some(item) => Ok(&item.additional_distributions),
+            Some(item) => {
+                let mut distributions = item.additional_distributions.clone();
+                distributions.push(item.distribution.clone());
+                Ok(distributions)
+                
+            },
             None => make_err("Could not get manifest"),
         }
     }

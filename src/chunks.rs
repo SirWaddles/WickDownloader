@@ -158,7 +158,7 @@ pub async fn download_file(http: Arc<HttpService>, manifest: &ChunkManifest, app
 
     let (r1, r2) = join!(
         write_chunks(file_receiver, position, target),
-        Spool::build(chunk_downloads, REQUEST_COUNT).then(|x| async move {
+        Spool::build(chunk_downloads, REQUEST_COUNT).then(|_x| async move {
             file_sender.close_channel();
             Ok(()) as WickResult<()>
         })
