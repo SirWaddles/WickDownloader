@@ -128,5 +128,9 @@ impl UtocService {
     pub fn get_mount_point(&self) -> &str {
         self.utoc.get_mount_point()
     }
+
+    pub fn get_id_list(&self) -> Vec<String> {
+        self.utoc.get_chunk_ids().iter().map(|v| v.get_id().to_string()).collect()
+    }
 }
 
