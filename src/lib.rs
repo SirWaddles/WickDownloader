@@ -10,12 +10,13 @@ use std::sync::{Arc, Mutex};
 pub use err::WickResult;
 use tokio::io::{AsyncReadExt};
 use john_wick_parse::dispatch::UtocManager;
+use john_wick_parse::manifest::{Manifest, FFileManifest};
 
 pub struct ServiceState {
     http: Arc<crate::http::HttpService>,
     app_manifest: manifest::AppManifest,
-    chunk_manifest: manifest::ChunkManifest,
-    files: Vec<manifest::ChunkManifestFile>,
+    chunk_manifest: Manifest,
+    files: Vec<FFileManifest>,
 }
 
 pub struct UtocService {
@@ -28,30 +29,14 @@ impl ServiceState {
         let http_service = Arc::new(crate::http::HttpService::new());
         let access_token = auth::get_token(&http_service).await?;
         let app_manifest = manifest::get_manifest(&http_service, &access_token).await?;
-        let mut chunk_manifest = manifest::get_chunk_manifest(&http_service, &app_manifest).await?;
+        let chunk_manifest = manifest::get_chunk_manifest(&http_service, &app_manifest).await?;
 
         // Filter out just the pak files
-        let files = chunk_manifest.get_files_mut(|v| {
-            let ext = &v[v.len() - 5..];
-            (ext == ".utoc" || ext == ".ucas") && &v[..8] == "Fortnite"
-        });
-
-        Ok(Self {
-            http: http_service,
-            app_manifest,
-            chunk_manifest,
-            files,
-        })
-    }
-
-    pub fn from_manifests(app_manifest: &str, chunk_manifest: &str) -> WickResult<Self> {
-        let http_service = Arc::new(crate::http::HttpService::new());
-        let app_manifest = manifest::create_app_manifest(app_manifest)?;
-        let mut chunk_manifest = manifest::create_chunk_manifest(chunk_manifest)?;
-        let files = chunk_manifest.get_files_mut(|v| {
-            let ext = &v[v.len() - 5..];
-            (ext == ".utoc" || ext == ".ucas") && &v[..8] == "Fortnite"
-        });
+        let files = chunk_manifest.get_files().iter().filter(|v| {
+            let filename = &v.filename;
+            let ext = &filename[filename.len() - 5..];
+            (ext == ".utoc" || ext == ".ucas") && &filename[..8] == "Fortnite"
+        }).map(|v| v.clone()).collect();
 
         Ok(Self {
             http: http_service,

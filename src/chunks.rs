@@ -1,7 +1,8 @@
-use crate::err::WickResult;
+use crate::err::{WickResult, make_err};
 use crate::http::HttpService;
-use crate::manifest::{ChunkManifest, ChunkManifestFile, AppManifest};
+use crate::manifest::AppManifest;
 use crate::spool::Spool;
+use john_wick_parse::manifest::{Manifest, FFileManifest, FChunkPart};
 use std::convert::AsRef;
 use std::io::{Cursor, Read, Seek, SeekFrom, Result as IOResult};
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -133,21 +134,39 @@ async fn send_chunk(http: Arc<HttpService>, chunk: ChunkDownload, sender: mpsc::
 
 const REQUEST_COUNT: usize = 20;
 
-pub async fn download_file(http: Arc<HttpService>, manifest: &ChunkManifest, app: &AppManifest, file: &ChunkManifestFile, target: &str) -> WickResult<()> {
+const DOWNLOAD_BASE: &'static str = "Builds/Fortnite/CloudDir/ChunksV4/";
+
+fn make_chunk_url(manifest: &Manifest, chunk: &FChunkPart) -> WickResult<String> {
+    let chunk_info = match manifest.get_chunks().iter().find(|v| v.guid == chunk.guid) {
+        Some(c) => c,
+        None => return make_err("Could not find chunk hash"),
+    };
+    let mut url = DOWNLOAD_BASE.to_owned();
+    url += &format!("{:02}", chunk_info.group_number);
+    url += "/";
+    url += &format!("{:016X}", chunk_info.hash);
+    url += "_";
+    url += &(format!("{}", chunk.guid).to_uppercase());
+    url += ".chunk";
+    
+    Ok(url)
+}
+
+pub async fn download_file(http: Arc<HttpService>, manifest: &Manifest, app: &AppManifest, file: &FFileManifest, target: &str) -> WickResult<()> {
     let distributions = app.get_distributions()?;
     let mut downloads = Vec::new();
     let mut position = 0;
     let mut i = 0;
-    for chunk in file.get_chunks() {
+    for chunk in &file.chunk_parts {
         let download = ChunkDownload {
             position,
-            length: chunk.get_size(),
-            offset: chunk.get_offset(),
-            url: distributions[i % distributions.len()].to_owned() + &chunk.get_url(&manifest)?,
+            length: chunk.size,
+            offset: chunk.offset,
+            url: distributions[i % distributions.len()].to_owned() + &make_chunk_url(manifest, &chunk)?,
             index: i,
         };
         downloads.push(download);
-        position += chunk.get_size() as u64;
+        position += chunk.size as u64;
         i += 1;
     }
 
@@ -169,21 +188,21 @@ pub async fn download_file(http: Arc<HttpService>, manifest: &ChunkManifest, app
     Ok(())
 }
 
-pub fn make_reader(http: Arc<HttpService>, manifest: &ChunkManifest, app: &AppManifest, file: &ChunkManifestFile) -> WickResult<ChunkReader> {
+pub fn make_reader(http: Arc<HttpService>, manifest: &Manifest, app: &AppManifest, file: &FFileManifest) -> WickResult<ChunkReader> {
     let distributions = app.get_distributions()?;
     let mut downloads = Vec::new();
     let mut position = 0;
     let mut i = 0;
-    for chunk in file.get_chunks() {
+    for chunk in &file.chunk_parts {
         let download = ChunkDownload {
             position,
-            length: chunk.get_size(),
-            offset: chunk.get_offset(),
-            url: distributions[i % distributions.len()].to_owned() + &chunk.get_url(&manifest)?,
+            length: chunk.size,
+            offset: chunk.offset,
+            url: distributions[i % distributions.len()].to_owned() + &make_chunk_url(manifest, &chunk)?,
             index: i,
         };
         downloads.push(download);
-        position += chunk.get_size() as u64;
+        position += chunk.size as u64;
         i += 1;
     }
 
