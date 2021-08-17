@@ -46,6 +46,26 @@ impl ServiceState {
         })
     }
 
+    pub fn from_manifests(app_manifest: &str, chunk_manifest: &[u8]) -> WickResult<Self> {
+        let http_service = Arc::new(crate::http::HttpService::new());
+        let app_manifest = manifest::create_app_manifest(app_manifest)?;
+        let chunk_manifest = Manifest::from_buffer(chunk_manifest)?;
+
+        // Filter out just the pak files
+        let files = chunk_manifest.get_files().iter().filter(|v| {
+            let filename = &v.filename;
+            let ext = &filename[filename.len() - 5..];
+            (ext == ".utoc" || ext == ".ucas") && &filename[..8] == "Fortnite"
+        }).map(|v| v.clone()).collect();
+
+        Ok(Self {
+            http: http_service,
+            app_manifest,
+            chunk_manifest,
+            files,
+        })
+    }
+
     pub fn get_paks(&self) -> Vec<String> {
         self.files.iter().map(|v| v.filename.to_owned()).collect()
     }
